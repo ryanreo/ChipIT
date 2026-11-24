@@ -25,7 +25,10 @@
 
 ## Building
 
+Clone `llama.cpp` into `app/src/main/cpp/llama.cpp` (requires Android NDK & CMake):
+
 ```bash
+git clone --depth 1 https://github.com/ggml-org/llama.cpp.git app/src/main/cpp/llama.cpp
 ./gradlew :app:testDebugUnitTest :app:assembleDebug
 ```
 

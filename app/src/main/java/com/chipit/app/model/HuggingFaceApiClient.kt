@@ -167,6 +167,7 @@ class HuggingFaceApiClient(
         destination: File,
         expectedSha256: String?,
         token: String?,
+        shouldCancel: () -> Boolean = { false },
         onProgress: (downloadedBytes: Long, totalBytes: Long) -> Unit
     ): Result<String> = withContext(Dispatchers.IO) {
         runCatching {
@@ -195,6 +196,7 @@ class HuggingFaceApiClient(
                     val buffer = ByteArray(64 * 1024)
                     body.byteStream().use { input ->
                         while (true) {
+                            if (shouldCancel()) error("Download cancelled")
                             val read = input.read(buffer)
                             if (read <= 0) break
                             out.write(buffer, 0, read)

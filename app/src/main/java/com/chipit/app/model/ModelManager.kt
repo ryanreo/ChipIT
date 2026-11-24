@@ -5,6 +5,13 @@ import android.content.Context
 import android.net.Uri
 import android.os.StatFs
 import android.provider.OpenableColumns
+import androidx.work.Constraints
+import androidx.work.ExistingWorkPolicy
+import androidx.work.NetworkType
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.OutOfQuotaPolicy
+import androidx.work.WorkManager
+import androidx.work.workDataOf
 import com.chipit.app.data.db.ModelDao
 import com.chipit.app.data.db.ModelEntity
 import com.chipit.app.data.db.ModelFormat
@@ -150,5 +157,45 @@ class ModelManager(
     suspend fun deleteModel(model: ModelEntity) = withContext(Dispatchers.IO) {
         runCatching { File(model.localPath).delete() }
         modelDao.delete(model)
+    }
+
+    fun enqueueBackgroundDownload(candidate: HfModelFileCandidate) {
+        val data = workDataOf(
+            ModelDownloadWorker.KEY_REPO_ID to candidate.repoId,
+            ModelDownloadWorker.KEY_FILE_NAME to candidate.fileName,
+            ModelDownloadWorker.KEY_DOWNLOAD_URL to candidate.downloadUrl,
+            ModelDownloadWorker.KEY_SIZE_BYTES to candidate.sizeBytes,
+            ModelDownloadWorker.KEY_SHA256 to candidate.sha256,
+            ModelDownloadWorker.KEY_FORMAT to candidate.format.name,
+            ModelDownloadWorker.KEY_QUANTIZATION to candidate.quantization,
+            ModelDownloadWorker.KEY_PARAM_COUNT_B to candidate.paramCountB,
+            ModelDownloadWorker.KEY_LICENSE to candidate.license,
+            ModelDownloadWorker.KEY_EST_RAM_MB to candidate.estRamMb
+        )
+        val req = OneTimeWorkRequestBuilder<ModelDownloadWorker>()
+            .setInputData(data)
+            .setConstraints(
+                Constraints.Builder()
+                    .setRequiredNetworkType(NetworkType.CONNECTED)
+                    .build()
+            )
+            .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+            .addTag(WORK_TAG)
+            .build()
+
+        WorkManager.getInstance(context).enqueueUniqueWork(
+            "$WORK_NAME_PREFIX${candidate.repoId}_${candidate.fileName}",
+            ExistingWorkPolicy.KEEP,
+            req
+        )
+    }
+
+    fun cancelBackgroundDownloads() {
+        WorkManager.getInstance(context).cancelAllWorkByTag(WORK_TAG)
+    }
+
+    companion object {
+        const val WORK_TAG = "chipit_model_download"
+        private const val WORK_NAME_PREFIX = "chipit_dl_"
     }
 }

@@ -8,6 +8,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
@@ -53,10 +54,15 @@ class LlamaCppEngine : InferenceEngine {
 
                 loadedModel = model
                 val elapsed = (System.currentTimeMillis() - start).coerceAtLeast(1L)
+                val label = if (isNative && !LlamaJni.nativeSupportsVulkan() && config.backend != ComputeBackend.CPU) {
+                    "CPU (ARM NEON — Vulkan SDK not bundled)"
+                } else {
+                    config.backend.displayName
+                }
                 LoadResult(
                     loadTimeMs = elapsed,
                     isNativeExecution = isNative,
-                    backendLabel = config.backend.displayName
+                    backendLabel = label
                 )
             }
         }
@@ -76,54 +82,61 @@ class LlamaCppEngine : InferenceEngine {
             val fullPrompt = buildChatPrompt(systemPrompt, userPrompt)
             var lastMetrics = Triple(0L, 0.0, 0.0)
             var counts = 0 to 0
-            LlamaJni.nativeGenerate(
-                handle = nativeHandle,
-                prompt = fullPrompt,
-                maxTokens = config.maxTokens,
-                temperature = config.temperature,
-                topP = config.topP,
-                topK = config.topK,
-                repeatPenalty = config.repeatPenalty,
-                callback = object : LlamaJni.TokenCallback {
-                    override fun onToken(token: String) {
-                        if (!cancelled.get()) {
-                            trySend(
-                                TokenEvent(
-                                    text = token,
-                                    ttftMs = lastMetrics.first,
-                                    prefillTps = lastMetrics.second,
-                                    decodeTps = lastMetrics.third,
-                                    promptTokens = counts.first,
-                                    generatedTokens = counts.second
+            val genJob = launch(Dispatchers.IO) {
+                LlamaJni.nativeGenerate(
+                    handle = nativeHandle,
+                    prompt = fullPrompt,
+                    maxTokens = config.maxTokens,
+                    temperature = config.temperature,
+                    topP = config.topP,
+                    topK = config.topK,
+                    repeatPenalty = config.repeatPenalty,
+                    callback = object : LlamaJni.TokenCallback {
+                        override fun onToken(token: String) {
+                            if (!cancelled.get()) {
+                                trySend(
+                                    TokenEvent(
+                                        text = token,
+                                        ttftMs = lastMetrics.first,
+                                        prefillTps = lastMetrics.second,
+                                        decodeTps = lastMetrics.third,
+                                        promptTokens = counts.first,
+                                        generatedTokens = counts.second
+                                    )
                                 )
-                            )
+                            }
+                        }
+
+                        override fun onMetrics(
+                            ttftMs: Long,
+                            prefillTps: Double,
+                            decodeTps: Double,
+                            promptTokens: Int,
+                            genTokens: Int
+                        ) {
+                            lastMetrics = Triple(ttftMs, prefillTps, decodeTps)
+                            counts = promptTokens to genTokens
                         }
                     }
-
-                    override fun onMetrics(
-                        ttftMs: Long,
-                        prefillTps: Double,
-                        decodeTps: Double,
-                        promptTokens: Int,
-                        genTokens: Int
-                    ) {
-                        lastMetrics = Triple(ttftMs, prefillTps, decodeTps)
-                        counts = promptTokens to genTokens
-                    }
-                }
-            )
-            trySend(
-                TokenEvent(
-                    text = "",
-                    isFinal = true,
-                    ttftMs = lastMetrics.first,
-                    prefillTps = lastMetrics.second,
-                    decodeTps = lastMetrics.third,
-                    promptTokens = counts.first,
-                    generatedTokens = counts.second
                 )
-            )
-            close()
+                trySend(
+                    TokenEvent(
+                        text = "",
+                        isFinal = true,
+                        ttftMs = lastMetrics.first,
+                        prefillTps = lastMetrics.second,
+                        decodeTps = lastMetrics.third,
+                        promptTokens = counts.first,
+                        generatedTokens = counts.second
+                    )
+                )
+                close()
+            }
+            awaitClose {
+                cancelGeneration()
+                genJob.cancel()
+            }
+            return@callbackFlow
         } else {
             // Deterministic fallback response for UI/benchmark/agent verification without native .so
             val isGpu = config.backend != ComputeBackend.CPU

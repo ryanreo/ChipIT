@@ -8,6 +8,8 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import androidx.work.WorkInfo
+import androidx.work.WorkManager
 import com.chipit.app.ActiveRuntimeState
 import com.chipit.app.ChipITApplication
 import com.chipit.app.data.db.ComputeBackend
@@ -16,8 +18,11 @@ import com.chipit.app.data.db.ModelFormat
 import com.chipit.app.data.db.SessionEntity
 import com.chipit.app.engine.InferenceConfig
 import com.chipit.app.model.DeviceFitStatus
+import com.chipit.app.model.DownloadProgress
 import com.chipit.app.model.HfModelFileCandidate
 import com.chipit.app.model.HfModelSummary
+import com.chipit.app.model.ModelDownloadWorker
+import com.chipit.app.model.ModelManager
 import com.chipit.app.service.ChipITForegroundService
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -44,7 +49,9 @@ class ChipITViewModel(application: Application) : AndroidViewModel(application) 
     val localModels = c.modelManager.observeModels()
         .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
-    val downloadProgress = c.modelManager.downloadProgress
+    private val _downloadProgress = MutableStateFlow<DownloadProgress?>(null)
+    val downloadProgress: StateFlow<DownloadProgress?> = _downloadProgress.asStateFlow()
+    private var lastReportedWorkId: String? = null
     val activeRuntime = c.activeRuntime
     val liveHardware = c.metricsCollector.liveSnapshot
     val benchmarkRuns = c.benchmarkRunner.observeRuns()
@@ -95,6 +102,38 @@ class ChipITViewModel(application: Application) : AndroidViewModel(application) 
                 delay(2000)
             }
         }
+        viewModelScope.launch {
+            WorkManager.getInstance(app)
+                .getWorkInfosByTagFlow(ModelManager.WORK_TAG)
+                .collect { infos ->
+                    val active = infos.firstOrNull {
+                        it.state == WorkInfo.State.RUNNING || it.state == WorkInfo.State.ENQUEUED
+                    }
+                    if (active != null) {
+                        val file = active.progress.getString(ModelDownloadWorker.KEY_PROGRESS_FILE)
+                            ?: "Model download"
+                        val downloaded = active.progress.getLong(ModelDownloadWorker.KEY_PROGRESS_DOWNLOADED, 0L)
+                        val total = active.progress.getLong(ModelDownloadWorker.KEY_PROGRESS_TOTAL, 0L)
+                        _downloadProgress.value = DownloadProgress(file, downloaded, total)
+                    } else {
+                        _downloadProgress.value = null
+                        val finished = infos.lastOrNull {
+                            it.state == WorkInfo.State.SUCCEEDED || it.state == WorkInfo.State.FAILED
+                        }
+                        if (finished != null && finished.id.toString() != lastReportedWorkId) {
+                            lastReportedWorkId = finished.id.toString()
+                            if (finished.state == WorkInfo.State.SUCCEEDED) {
+                                val name = finished.outputData.getString(ModelDownloadWorker.KEY_RESULT_NAME) ?: "Model"
+                                val quant = finished.outputData.getString(ModelDownloadWorker.KEY_RESULT_QUANT) ?: ""
+                                _statusBanner.value = "Downloaded $name ($quant)".trim()
+                            } else {
+                                val err = finished.outputData.getString(ModelDownloadWorker.KEY_ERROR)
+                                if (!err.isNullOrBlank()) _statusBanner.value = err
+                            }
+                        }
+                    }
+                }
+        }
     }
 
     fun getDeviceResources() = c.modelManager.getDeviceResources()
@@ -133,14 +172,18 @@ class ChipITViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun downloadCandidate(candidate: HfModelFileCandidate) {
-        viewModelScope.launch {
-            if (candidate.fitStatus == DeviceFitStatus.WONT_FIT) {
-                _statusBanner.value = "Warning: ${candidate.fileName} is marked Won't fit (~${candidate.estRamMb} MB RAM)."
-            }
-            c.modelManager.downloadCandidate(candidate)
-                .onSuccess { _statusBanner.value = "Downloaded ${it.name} (${it.quantization})" }
-                .onFailure { _statusBanner.value = it.message ?: "Download failed" }
+        if (candidate.fitStatus == DeviceFitStatus.WONT_FIT) {
+            _statusBanner.value = "Warning: ${candidate.fileName} is marked Won't fit (~${candidate.estRamMb} MB RAM)."
+        } else {
+            _statusBanner.value = "Queued background download: ${candidate.fileName}"
         }
+        c.modelManager.enqueueBackgroundDownload(candidate)
+    }
+
+    fun cancelDownload() {
+        c.modelManager.cancelBackgroundDownloads()
+        _downloadProgress.value = null
+        _statusBanner.value = "Download cancelled (partial file kept for resume)"
     }
 
     fun importLocalModel(uri: Uri) {

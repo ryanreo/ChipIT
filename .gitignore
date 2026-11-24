@@ -18,3 +18,4 @@ local.properties
 *.jks
 *.keystore
 /app/build
+/app/src/main/cpp/llama.cpp

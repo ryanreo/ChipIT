@@ -71,12 +71,25 @@ fun ModelsScreen(vm: ChipITViewModel) {
             item {
                 Card {
                     Column(Modifier.padding(12.dp)) {
-                        Text("Downloading ${prog.fileName}", style = MaterialTheme.typography.labelLarge)
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "Downloading ${prog.fileName}",
+                                style = MaterialTheme.typography.labelLarge,
+                                modifier = Modifier.weight(1f)
+                            )
+                            TextButton(onClick = { vm.cancelDownload() }) {
+                                Text("Cancel", color = MaterialTheme.colorScheme.error)
+                            }
+                        }
                         Spacer(Modifier.height(6.dp))
                         LinearProgressIndicator(progress = { prog.fraction }, modifier = Modifier.fillMaxWidth())
                         Spacer(Modifier.height(4.dp))
                         Text(
-                            "${prog.downloadedBytes / (1024 * 1024)} / ${prog.totalBytes / (1024 * 1024)} MB",
+                            "${prog.downloadedBytes / (1024 * 1024)} / ${prog.totalBytes / (1024 * 1024)} MB (runs in background)",
                             style = MaterialTheme.typography.bodySmall
                         )
                     }
