@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">ChipIT</string>
+    <string name="accessibility_service_description">Allows ChipIT\'s local on-device LLM agent to read screen UI elements and perform taps, text input, and scrolls on apps you explicitly allow.</string>
+</resources>
