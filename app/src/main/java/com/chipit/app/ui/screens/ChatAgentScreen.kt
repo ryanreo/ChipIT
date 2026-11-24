@@ -41,7 +41,7 @@ fun ChatAgentScreen(vm: ChipITViewModel) {
                         style = MaterialTheme.typography.labelLarge
                     )
                     Text(
-                        if (runtime.model != null) runtime.config.backend.displayName else "Idle",
+                        if (runtime.model != null) runtime.backendLabel else "Idle",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.primary
                     )

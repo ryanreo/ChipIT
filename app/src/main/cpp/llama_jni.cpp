@@ -22,6 +22,11 @@ struct LlamaSession {
     std::mutex mutex;
 };
 
+bool chipit_abort_callback(void * data) {
+    auto * session = static_cast<LlamaSession *>(data);
+    return session != nullptr && session->cancel_flag.load(std::memory_order_relaxed);
+}
+
 /**
  * Decodes complete UTF-8 sequences from `buf` into UTF-16 `out` (safe for JNI NewString,
  * including 4-byte emoji surrogate pairs), erasing consumed bytes and keeping incomplete
@@ -162,20 +167,24 @@ Java_com_chipit_app_engine_LlamaJni_nativeLoadModel(
         return 0L;
     }
 
+    auto * session = new LlamaSession();
+
     llama_context_params cparams = llama_context_default_params();
     cparams.n_ctx = static_cast<uint32_t>(context_len > 0 ? context_len : 2048);
     cparams.n_batch = 512;
     cparams.n_threads = threads > 0 ? threads : 4;
     cparams.n_threads_batch = cparams.n_threads;
+    cparams.abort_callback = chipit_abort_callback;
+    cparams.abort_callback_data = session;
 
     llama_context * ctx = llama_init_from_model(model, cparams);
     if (ctx == nullptr) {
         LOGE("llama_init_from_model failed");
+        delete session;
         llama_model_free(model);
         return 0L;
     }
 
-    auto * session = new LlamaSession();
     session->model = model;
     session->ctx = ctx;
     return reinterpret_cast<jlong>(session);

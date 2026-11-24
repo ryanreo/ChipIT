@@ -57,11 +57,21 @@ fun ModelsScreen(vm: ChipITViewModel) {
                     )
                     runtime.model?.let { loaded ->
                         Spacer(Modifier.height(4.dp))
-                        Text(
-                            "Active: ${loaded.name} (${runtime.config.backend.displayName}, ctx=${runtime.config.contextLength})",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.primary
-                        )
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "Active: ${loaded.name} (${runtime.backendLabel}, ctx=${runtime.config.contextLength})",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.weight(1f)
+                            )
+                            TextButton(onClick = { vm.unloadModel() }) {
+                                Text("Unload")
+                            }
+                        }
                     }
                 }
             }

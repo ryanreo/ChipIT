@@ -206,6 +206,8 @@ class ChipITViewModel(application: Application) : AndroidViewModel(application) 
 
     fun loadModel(model: ModelEntity, config: InferenceConfig) {
         viewModelScope.launch {
+            stopGenerationOrAgent()
+            c.activeEngine().unload()
             _statusBanner.value = "Loading ${model.name} on ${config.backend.displayName}..."
             val engine = if (model.format == ModelFormat.LITERT.name || config.backend == ComputeBackend.LITERT_GPU) {
                 c.liteRtEngine
@@ -230,15 +232,26 @@ class ChipITViewModel(application: Application) : AndroidViewModel(application) 
                             sessionId = sessionId,
                             config = config,
                             isNative = res.isNativeExecution,
-                            loadTimeMs = res.loadTimeMs
+                            loadTimeMs = res.loadTimeMs,
+                            backendLabel = res.backendLabel
                         )
                     )
-                    ChipITForegroundService.start(app, "${model.name} loaded (${config.backend.displayName})")
-                    _statusBanner.value = "Loaded ${model.name} in ${res.loadTimeMs} ms"
+                    ChipITForegroundService.start(app, "${model.name} loaded (${res.backendLabel})")
+                    _statusBanner.value = "Loaded ${model.name} on ${res.backendLabel} in ${res.loadTimeMs} ms"
                 }
                 .onFailure {
                     _statusBanner.value = it.message ?: "Failed to load model"
                 }
+        }
+    }
+
+    fun unloadModel() {
+        viewModelScope.launch {
+            stopGenerationOrAgent()
+            c.activeEngine().unload()
+            c.updateRuntime(ActiveRuntimeState())
+            ChipITForegroundService.stop(app)
+            _statusBanner.value = "Model unloaded"
         }
     }
 

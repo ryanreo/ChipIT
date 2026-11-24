@@ -24,7 +24,8 @@ data class ActiveRuntimeState(
     val sessionId: Long? = null,
     val config: InferenceConfig = InferenceConfig(),
     val isNative: Boolean = false,
-    val loadTimeMs: Long = 0L
+    val loadTimeMs: Long = 0L,
+    val backendLabel: String = "Idle"
 )
 
 class AppContainer(context: Context) {
